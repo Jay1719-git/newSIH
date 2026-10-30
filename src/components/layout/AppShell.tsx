@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   Users,
@@ -82,7 +82,12 @@ const ROUTE_META: Record<string, { title: string; subtitle: string; crumb: strin
 };
 
 export const AppShell: React.FC = () => {
-  const { user, apiMode, switchRolePersona, logout } = useAuth();
+  const { user, apiMode, isAuthenticated, isLoading, switchRolePersona, logout } = useAuth();
+
+  if (apiMode === 'live' && isLoading) {
+    return <div role="status" className="min-h-screen p-8 text-sm text-[#686B65]">Restoring authenticated session…</div>;
+  }
+  if (apiMode === 'live' && !isAuthenticated) return <Navigate to="/login" replace />;
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -141,6 +146,7 @@ export const AppShell: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3 text-xs">
+          {apiMode === 'mock' ? (
           <Link
             to="/verify/att-2026-901"
             className="inline-flex items-center gap-1 font-mono text-[11px] text-[#244C3A] hover:underline"
@@ -148,6 +154,9 @@ export const AppShell: React.FC = () => {
             <span>Public Verifier (/verify/att-2026-901)</span>
             <ExternalLink className="w-3 h-3" />
           </Link>
+          ) : (
+            <span className="text-[#8E6218]">Public verification is unavailable in the FastAPI backend.</span>
+          )}
         </div>
       </div>
 
@@ -247,7 +256,7 @@ export const AppShell: React.FC = () => {
             </div>
 
             {/* Role & Tenant Switcher Controls for Demonstration Inspection */}
-            <div className="flex flex-wrap items-center gap-3 text-xs">
+            {apiMode === 'mock' ? <div className="flex flex-wrap items-center gap-3 text-xs">
               <div className="flex items-center gap-1.5">
                 <label htmlFor="topbar-role-select" className="text-[#686B65] font-medium">
                   Role:
@@ -283,7 +292,11 @@ export const AppShell: React.FC = () => {
                   </select>
                 </div>
               )}
-            </div>
+            </div> : (
+              <div className="text-xs text-[#686B65]">
+                Authenticated API account: <span className="font-mono">{user.role}</span>
+              </div>
+            )}
           </header>
 
           {/* Mobile Drawer Navigation */}

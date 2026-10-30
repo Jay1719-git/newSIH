@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
 import { weaveApiClient, weaveQueryKeys } from '../../lib/api-client';
-import type { StudentRecord } from '../../lib/weaveEngine';
+import type { ApiStudentRecord } from '../../lib/api-client';
 
 export const StudentsPage: React.FC = () => {
   const { user } = useAuth();
@@ -61,7 +61,7 @@ export const StudentsPage: React.FC = () => {
 
   const totalPages = Math.max(1, Math.ceil(filteredAndSorted.length / pageSize));
   const paginated = filteredAndSorted.slice((page - 1) * pageSize, page * pageSize);
-  const selectedStudent: StudentRecord | null =
+  const selectedStudent: ApiStudentRecord | null =
     filteredAndSorted.find((s) => s.id === selectedId) || paginated[0] || null;
 
   const toggleSort = (field: 'full_name' | 'student_ref' | 'enrollment_year') => {

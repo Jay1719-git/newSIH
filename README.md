@@ -138,14 +138,14 @@ flowchart TB
     API --> STATE
 ```
 
-The runnable application lives at the repository root. [`server.ts`](server.ts) provides demo endpoints and serves the frontend. [`weaveEngine.ts`](src/lib/weaveEngine.ts) contains validation, CSV parsing, identifier helpers and simulated verification. [`syntheticSeed.ts`](src/lib/syntheticSeed.ts) supplies the demo accounts and records.
+The runnable frontend and mock demo API live at the repository root. [`server.ts`](server.ts) serves the React interface and the explicit in-memory demo mode. Live mode can proxy supported `/api/v1` requests to the FastAPI backend while preserving the root frontend and its routes. [`weaveEngine.ts`](src/lib/weaveEngine.ts) contains demo validation, CSV parsing, identifier helpers and simulated verification. [`syntheticSeed.ts`](src/lib/syntheticSeed.ts) supplies mock-mode accounts and records only.
 
 | Layer | Current implementation | Accepted target |
 | --- | --- | --- |
 | Frontend | React 19, TypeScript, Vite, React Router 7 | React 18 stack documented for `apps/web` |
 | UI and data | Tailwind CSS 4, TanStack Query, React Hook Form, Zod, Recharts, Three.js | Accessible UI primitives and contract-generated client |
-| API | Express 4 running through `tsx` | Python 3.12, FastAPI, Uvicorn, Pydantic v2 |
-| Persistence | Process-local synthetic state | PostgreSQL 16, SQLAlchemy 2.0, Alembic |
+| API | Express 4 fixture API in mock mode; same-origin proxy in live mode | Python 3.12, FastAPI, Uvicorn, Pydantic v2 |
+| Persistence | Process-local only in mock mode; PostgreSQL 16 in live mode | PostgreSQL 16, SQLAlchemy 2.0, Alembic |
 | Batch processing | Demo processing inside the server | PostgreSQL-backed queue and separate worker |
 | Attestations | Deterministic signature simulation | Ed25519 signing with externally managed keys |
 
@@ -175,6 +175,46 @@ The current prototype has specific limits:
 - **Advisory AI:** validation, authorization and verification decisions must remain deterministic. Optional assistant output must not become decision authority.
 
 Use synthetic records only. Do not enter real student identifiers or deploy this demo as a production verification service.
+
+## FastAPI integration mode
+
+The root frontend defaults to **mock mode**. To use persisted records, configure `.env` with a local PostgreSQL URL whose database is `weave_demo`, `VITE_API_MODE=live`, and `WEAVE_FASTAPI_URL=http://127.0.0.1:8000`. Keep `VITE_API_BASE_URL` empty to use the root app's same-origin proxy; the backend's refresh cookie is not configured for cross-origin requests.
+
+From a Python 3.12 virtual environment at the repository root:
+
+```powershell
+python -m pip install -e "apps/api[dev]"
+Copy-Item .env.example .env
+# Set a private POSTGRES_PASSWORD and a freshly generated APAAR_HMAC_KEY in .env.
+docker compose --env-file .env -f infra/compose.yaml up -d db
+python -m alembic -c apps/api/alembic.ini upgrade head
+python -m app.cli seed-demo
+python -m app.cli create-user
+```
+
+`seed-demo` creates two fictional institutions, a programme/year, capacity pools, deterministic CSV scenarios in `synthetic/generated`, and a manifest. It prints institution UUIDs for local account provisioning. Create an institution administrator and operator for each institution and a `regulator_admin`; set their passwords through the CLI. No passwords are seeded.
+
+In separate terminals, start FastAPI and the existing root app:
+
+```powershell
+python -m uvicorn app.main:app --app-dir apps/api --host 127.0.0.1 --port 8000 --reload
+npm run dev
+```
+
+When `VITE_API_MODE=live`, the root server proxies requests to FastAPI. If the upstream is missing, requests return an error instead of falling through to fixture responses. Supported backend workflows include login/session, institution overview, CSV upload, batch detail/validation, commit, and duplicate scan/review. The FastAPI implementation does **not** yet provide `/conflicts`, the legacy attestation registry, `/audit-events`, public `/verify/:token`, or assistant endpoints. Those screens disclose their unavailability in live mode; their mock-mode data is not evidence of backend integration. No government verification integration exists.
+
+Use `synthetic/generated/manifest.json` for expected scenarios. After the valid Kurukshetra upload is committed, upload the Delhi file and run a duplicate scan to create a cross-institution review lead. The invalid file should show deterministic row findings; the capacity file should fail commit atomically when two rows exceed the remaining pool. Uploading the valid file again under a different filename demonstrates content-based idempotency.
+
+The reset command is intentionally gated to `APP_ENV=synthetic`, loopback PostgreSQL database `weave_demo`, an explicit command confirmation, and an explicit environment guard. It truncates application data but preserves Alembic history:
+
+```powershell
+$env:WEAVE_ALLOW_DEMO_RESET = 'I_UNDERSTAND'
+python -m app.cli reset-demo --confirm-demo-reset RESET-WEAVE-DEMO
+python -m app.cli seed-demo
+Remove-Item Env:WEAVE_ALLOW_DEMO_RESET
+```
+
+These workflows were not exercised against PostgreSQL in this environment because Docker and a configured database are unavailable. See [the API setup and limitations](apps/api/README.md) for exact endpoint support.
 
 ## Development roadmap
 

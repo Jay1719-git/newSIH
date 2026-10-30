@@ -12,17 +12,30 @@ import { weaveApiClient, weaveQueryKeys, ApiClientError } from '../../lib/api-cl
 import { isInstitutionScopedRole, isRegulatorRole } from '../../lib/weaveEngine';
 
 export const DuplicatesPage: React.FC = () => {
-  const { user, switchRolePersona } = useAuth();
+  const { user, switchRolePersona, apiMode } = useAuth();
   const queryClient = useQueryClient();
   const instScoped = isInstitutionScopedRole(user.role);
-  const canAdjudicate = isRegulatorRole(user.role);
+  const canScan = apiMode === 'live' && [
+    'institution_admin',
+    'institution_operator',
+    'regulator_admin',
+  ].includes(user.role);
+  const canAdjudicate = apiMode === 'mock'
+    ? isRegulatorRole(user.role)
+    : user.role === 'regulator_admin';
 
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'OPEN' | 'RESOLVED' | 'INFO_REQUESTED'>(
     'ALL'
   );
   const [selectedId, setSelectedId] = useState<string>('CNF-2026-019');
   const [decisionAction, setDecisionAction] = useState<
-    'CONFIRM_DUPLICATE' | 'NOT_A_DUPLICATE' | 'REQUEST_INFO'
+    | 'CONFIRM_DUPLICATE'
+    | 'NOT_A_DUPLICATE'
+    | 'REQUEST_INFO'
+    | 'CONFIRMED_DUPLICATE'
+    | 'DISTINCT_STUDENTS'
+    | 'INSUFFICIENT_EVIDENCE'
+    | 'ESCALATED'
   >('NOT_A_DUPLICATE');
   const [reasonNotes, setReasonNotes] = useState<string>('');
   const [feedback, setFeedback] = useState<{
@@ -30,7 +43,7 @@ export const DuplicatesPage: React.FC = () => {
     text: string;
   } | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: weaveQueryKeys.conflicts(user.role, user.institution_id),
     queryFn: () => weaveApiClient.getConflicts(user.role, user.institution_id),
   });
@@ -56,7 +69,9 @@ export const DuplicatesPage: React.FC = () => {
     onSuccess: (res) => {
       setFeedback({
         type: 'success',
-        text: `Recorded decision ${res.conflict.resolution_action} on ${res.conflict.id} and appended audit event ${res.audit_event.id}.`,
+        text: res.audit_event
+          ? `Recorded decision ${res.conflict.resolution_action} on ${res.conflict.id} and appended audit event ${res.audit_event.id}.`
+          : `Recorded decision ${res.conflict.resolution_action} on ${res.conflict.id}.`,
       });
       setReasonNotes('');
       queryClient.invalidateQueries({ queryKey: ['weave'] });
@@ -70,9 +85,37 @@ export const DuplicatesPage: React.FC = () => {
     },
   });
 
+  const scanMutation = useMutation({
+    mutationFn: () => weaveApiClient.scanDuplicates(),
+    onSuccess: (result) => {
+      setFeedback({
+        type: 'success',
+        text: `Scanned ${result.candidates_examined} candidate pair(s); ${result.cases_created} new case(s), ${result.cases_rescanned} refreshed.`,
+      });
+      queryClient.invalidateQueries({ queryKey: weaveQueryKeys.conflicts(user.role, user.institution_id) });
+    },
+    onError: (err) => {
+      setFeedback({
+        type: 'error',
+        text: err instanceof ApiClientError ? `${err.message} (${err.code})` : 'Duplicate scan failed.',
+      });
+    },
+  });
+
   if (isLoading) {
     return (
       <div role="status" className="bg-white border border-[#DEDDD5] rounded-md p-6 animate-pulse h-64" />
+    );
+  }
+
+  if (isError) {
+    return (
+      <div role="alert" className="bg-white border border-[#99322B] rounded-md p-6 text-xs text-[#99322B]">
+        <p>{error instanceof Error ? error.message : 'Unable to load review cases.'}</p>
+        <button type="button" onClick={() => refetch()} className="mt-3 underline font-medium">
+          Retry
+        </button>
+      </div>
     );
   }
 
@@ -90,7 +133,7 @@ export const DuplicatesPage: React.FC = () => {
           </p>
         </div>
 
-        {instScoped && (
+        {instScoped && apiMode === 'mock' && (
           <button
             type="button"
             onClick={() => switchRolePersona('regulator_officer')}
@@ -118,6 +161,22 @@ export const DuplicatesPage: React.FC = () => {
       )}
 
       {/* Filter Bar */}
+      {canScan && (
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            disabled={scanMutation.isPending}
+            onClick={() => scanMutation.mutate()}
+            className="px-3 py-2 text-xs font-medium text-white bg-[#244C3A] rounded-sm disabled:opacity-50"
+          >
+            {scanMutation.isPending ? 'Scanning records…' : 'Scan for duplicate candidates'}
+          </button>
+          <span className="text-xs text-[#686B65]">Candidates are review leads, not fraud findings.</span>
+        </div>
+      )}
+      {feedback && scanMutation.isError && (
+        <p role="alert" className="text-xs text-[#99322B]">{feedback.text}</p>
+      )}
       <div className="flex flex-wrap items-center gap-1 p-1 bg-[#E9E7DF] rounded-md w-fit">
         {(
           [
@@ -156,7 +215,9 @@ export const DuplicatesPage: React.FC = () => {
       {/* Queue List + Adjudication Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         <div className="lg:col-span-7 bg-white border border-[#DEDDD5] rounded-md divide-y divide-[#DEDDD5]">
-          {filtered.map((c) => {
+          {filtered.length === 0 ? (
+            <p className="p-6 text-xs text-[#686B65]">No review cases are available in this backend scope.</p>
+          ) : filtered.map((c) => {
             const active = activeCase?.id === c.id;
             return (
               <div
@@ -211,18 +272,18 @@ export const DuplicatesPage: React.FC = () => {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-[#686B65]">
                   <div>
-                    Primary: <span className="text-[#20241F]">{c.primary_institution_name}</span> (
-                    <span className="font-mono">{c.primary_program_code}</span>)
+                    Primary: <span className="text-[#20241F]">{c.primary_institution_name}</span>
+                    {c.primary_program_code && <> (<span className="font-mono">{c.primary_program_code}</span>)</>}
                   </div>
                   <div>
                     Counterpart:{' '}
-                    <span className="text-[#20241F]">{c.competing_institution_name}</span> (
-                    <span className="font-mono">{c.competing_program_code}</span>)
+                    <span className="text-[#20241F]">{c.competing_institution_name}</span>
+                    {c.competing_program_code && <> (<span className="font-mono">{c.competing_program_code}</span>)</>}
                   </div>
                 </div>
 
                 <div className="text-[11px] font-mono text-[#686B65] tabular-nums">
-                  {c.academic_year_overlap || `AY ${c.enrollment_year}`} · Assigned:{' '}
+                  {c.academic_year_overlap || (c.enrollment_year ? `AY ${c.enrollment_year}` : 'Academic year not supplied')} · Assigned:{' '}
                   {c.assigned_reviewer || 'Unassigned'}
                 </div>
               </div>
@@ -244,7 +305,7 @@ export const DuplicatesPage: React.FC = () => {
                 </h2>
                 <p className="text-xs font-mono text-[#686B65] mt-0.5 tabular-nums">
                   Masked APAAR: {activeCase.apaar_masked} ·{' '}
-                  {activeCase.academic_year_overlap || `AY ${activeCase.enrollment_year}`}
+                  {activeCase.academic_year_overlap || (activeCase.enrollment_year ? `AY ${activeCase.enrollment_year}` : 'Academic year not supplied')}
                 </p>
               </div>
 
@@ -252,9 +313,7 @@ export const DuplicatesPage: React.FC = () => {
               <div className="space-y-2 text-xs">
                 <div className="font-semibold text-[#20241F]">Backend Match Evidence</div>
                 <ul className="space-y-1.5 text-[#686B65] list-disc pl-4">
-                  {(activeCase.match_evidence || [
-                    'Identical salted SHA-256 APAAR digest across two enrollment records.',
-                  ]).map((ev, i) => (
+                  {(activeCase.match_evidence || ['No match evidence was supplied by the API.']).map((ev, i) => (
                     <li key={i}>{ev}</li>
                   ))}
                 </ul>
@@ -275,9 +334,11 @@ export const DuplicatesPage: React.FC = () => {
                           <span>{dh.timestamp.slice(0, 10)}</span>
                         </div>
                         <p className="text-[#20241F]">{dh.notes}</p>
-                        <div className="font-mono text-[10px] text-[#686B65]">
-                          Actor: {dh.actor_email} ({dh.actor_role})
-                        </div>
+                        {(dh.actor_email || dh.actor_role) && (
+                          <div className="font-mono text-[10px] text-[#686B65]">
+                            Actor: {dh.actor_email} {dh.actor_role && `(${dh.actor_role})`}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -304,29 +365,27 @@ export const DuplicatesPage: React.FC = () => {
                     id="conflict-decision-select"
                     disabled={!canAdjudicate}
                     value={decisionAction}
-                    onChange={(e) =>
-                      setDecisionAction(
-                        e.target.value as
-                          | 'CONFIRM_DUPLICATE'
-                          | 'NOT_A_DUPLICATE'
-                          | 'REQUEST_INFO'
-                      )
-                    }
+                    onChange={(e) => setDecisionAction(e.target.value as typeof decisionAction)}
                     className="w-full px-3 py-2 text-xs bg-[#F7F6F2] border border-[#DEDDD5] rounded-md disabled:opacity-50"
                   >
-                    <option value="NOT_A_DUPLICATE">
-                      Mark as Not a Duplicate (Valid Transfer / Withdrawal Verified)
-                    </option>
-                    <option value="CONFIRM_DUPLICATE">
-                      Confirm Duplicate Submission (Flag Record Invalid)
-                    </option>
-                    <option value="REQUEST_INFO">
-                      Request Additional Information from Institutions
-                    </option>
+                    {apiMode === 'mock' ? (
+                      <>
+                        <option value="NOT_A_DUPLICATE">Mark as Not a Duplicate</option>
+                        <option value="CONFIRM_DUPLICATE">Confirm Duplicate</option>
+                        <option value="REQUEST_INFO">Request Additional Information</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="DISTINCT_STUDENTS">Distinct students</option>
+                        <option value="CONFIRMED_DUPLICATE">Confirmed duplicate</option>
+                        <option value="INSUFFICIENT_EVIDENCE">Insufficient evidence</option>
+                        <option value="ESCALATED">Escalate</option>
+                      </>
+                    )}
                   </select>
                 </div>
 
-                <div>
+                {apiMode === 'mock' ? <div>
                   <label
                     htmlFor="conflict-reason-textarea"
                     className="block text-xs font-medium text-[#20241F] mb-1"
@@ -342,7 +401,9 @@ export const DuplicatesPage: React.FC = () => {
                     placeholder="Document evidence reviewed (e.g. JoSAA withdrawal slip ref)..."
                     className="w-full p-2.5 text-xs bg-[#F7F6F2] border border-[#DEDDD5] rounded-md disabled:opacity-50"
                   />
-                </div>
+                </div> : (
+                  <p className="text-xs text-[#686B65]">The live API records the supported outcome only; reviewer notes are not part of its contract.</p>
+                )}
 
                 {feedback && (
                   <div

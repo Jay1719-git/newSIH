@@ -10,7 +10,93 @@ import type {
 } from './weaveEngine';
 import type { DemoAccount } from './syntheticSeed';
 
-const API_BASE_PATH = '/api/v1';
+const configuredBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+const API_BASE_PATH = `${configuredBaseUrl}/api/v1`;
+const mockApiMode = import.meta.env.VITE_API_MODE !== 'live';
+
+type BackendDuplicateCase = {
+  case_id: string;
+  match_type: 'EXACT_WITHIN_INSTITUTION' | 'POTENTIAL_WITHIN_INSTITUTION' | 'POTENTIAL_CROSS_INSTITUTION';
+  confidence_band: 'HIGH' | 'MEDIUM';
+  masked_fields: Array<{
+    institution_id: string;
+    institution_name: string | null;
+    student_reference: string | null;
+    name: string | null;
+    apaar: string | null;
+  }>;
+  explanation: string;
+  reason_codes: string[];
+  review_status: string;
+  outcome: string | null;
+  decision_history: Array<{ outcome: string; reviewer_user_id: string; reviewed_at: string }>;
+  created_at: string;
+};
+
+function mapBackendDuplicate(item: BackendDuplicateCase): ConflictCase {
+  const first = item.masked_fields[0];
+  const second = item.masked_fields[1];
+  const status: ConflictCase['status'] = item.review_status === 'OPEN' || item.review_status === 'INFO_REQUESTED'
+    ? item.review_status
+    : 'RESOLVED';
+  return {
+    id: item.case_id,
+    apaar_masked: first?.apaar || second?.apaar || 'NOT PROVIDED',
+    apaar_hash: '',
+    student_name: first?.name || 'Masked record',
+    primary_institution_id: first?.institution_id || '',
+    primary_institution_name: first?.institution_name || 'Institution record',
+    primary_program_code: '',
+    competing_institution_id: second?.institution_id || '',
+    competing_institution_name: second?.institution_name || 'Institution record',
+    competing_program_code: '',
+    enrollment_year: 0,
+    academic_year_overlap: '',
+    conflict_type: item.match_type !== 'POTENTIAL_CROSS_INSTITUTION'
+      ? 'INTRA_BATCH_DUPLICATE'
+      : 'CROSS_INSTITUTION_DUPLICATE',
+    match_evidence: [item.explanation, ...item.reason_codes],
+    severity: item.confidence_band,
+    status,
+    assigned_reviewer: '',
+    resolution_action: item.outcome as ConflictCase['resolution_action'],
+    decision_history: item.decision_history.map((entry, index) => ({
+      id: `${item.case_id}-${index}`,
+      action: entry.outcome,
+      actor_email: '',
+      actor_role: '',
+      notes: '',
+      timestamp: entry.reviewed_at,
+    })),
+    detected_at: item.created_at,
+  };
+}
+
+// API records intentionally omit the engine-only HMAC digest. The frontend's
+// local synthetic engine model remains unchanged and must never be sent by the API.
+export type ApiStudentRecord = Omit<StudentRecord, 'apaar_hash' | 'validation_results'> & {
+  apaar_status: 'NOT_PROVIDED' | 'FORMAT_VALID' | 'FORMAT_INVALID';
+  row_status: 'READY' | 'WARNING' | 'REVIEW_REQUIRED' | 'REJECTED' | 'COMMITTED';
+  admission_date: string | null;
+  admission_status: 'ADMITTED' | 'WITHDRAWN' | 'PENDING_REVIEW';
+  seat_category_code: string | null;
+  supernumerary_seat: boolean;
+  nri_status: boolean;
+  oci_status: boolean;
+  foreign_national_status: boolean;
+  validation_results: Array<{
+    rule_code: string;
+    stu_code: string;
+    rule_name: string;
+    outcome: 'PASS' | 'WARN' | 'REVIEW' | 'FAIL';
+    reason: string;
+    expected_value?: string;
+    affected_field: string | null;
+    actual_masked: string | null;
+    remediation: string | null;
+    ruleset_version: string;
+  }>;
+};
 
 export class ApiClientError extends Error {
   code: string;
@@ -66,6 +152,8 @@ async function requestWithRefresh<T>(
         return requestWithRefresh<T>(endpoint, options, true);
       }
     }
+    setInMemoryAccessToken(null);
+    window.dispatchEvent(new Event('weave:session-expired'));
   }
 
   const data = await response.json().catch(() => ({}));
@@ -118,30 +206,30 @@ export const weaveApiClient = {
       role: UserRole;
       institutions: InstitutionSummary[];
       all_institutions: InstitutionSummary[];
-    }>(
-      `/institutions/me?role=${encodeURIComponent(role)}&institution_id=${encodeURIComponent(
-        institutionId || 'INST-KKR-101'
-      )}`
-    ),
+    }>(mockApiMode
+      ? `/institutions/me?role=${encodeURIComponent(role)}&institution_id=${encodeURIComponent(
+          institutionId || 'INST-KKR-101'
+        )}`
+      : '/institutions/me'),
 
   getValidationResults: (role: UserRole, institutionId?: string) =>
     requestWithRefresh<{
       environment: string;
       ruleset_version: string;
       batches: StudentBatch[];
-      students: StudentRecord[];
-    }>(
-      `/students/validation-results?role=${encodeURIComponent(
-        role
-      )}&institution_id=${encodeURIComponent(institutionId || 'INST-KKR-101')}`
-    ),
+      students: ApiStudentRecord[];
+    }>(mockApiMode
+      ? `/students/validation-results?role=${encodeURIComponent(
+          role
+        )}&institution_id=${encodeURIComponent(institutionId || 'INST-KKR-101')}`
+      : '/students/validation-results'),
 
   getBatchDetail: (batchId: string) =>
     requestWithRefresh<{
       environment: string;
       ruleset_version: string;
       batch: StudentBatch;
-      records: StudentRecord[];
+      records: ApiStudentRecord[];
     }>(`/students/batches/${encodeURIComponent(batchId)}`),
 
   uploadBatch: (params: {
@@ -152,13 +240,21 @@ export const weaveApiClient = {
     actor_email: string;
   }) =>
     requestWithRefresh<{
+      environment: string;
+      ruleset_version: string;
       batch: StudentBatch;
-      records: StudentRecord[];
+      records: ApiStudentRecord[];
       conflicts_created: ConflictCase[];
-      audit_event: AuditEvent;
+      review_cases_created: string[];
+      audit_event: AuditEvent | null;
+      idempotent_replay: boolean;
     }>('/students/batches/upload', {
       method: 'POST',
-      body: JSON.stringify(params),
+      body: JSON.stringify(
+        mockApiMode
+          ? params
+          : { filename: params.filename, csv_content: params.csv_content }
+      ),
     }),
 
   commitBatch: (params: {
@@ -170,39 +266,71 @@ export const weaveApiClient = {
       environment: string;
       batch: StudentBatch;
       newly_committed: number;
-      audit_event: AuditEvent;
+      audit_event: AuditEvent | null;
     }>(`/students/batches/${encodeURIComponent(params.batchId)}/commit`, {
       method: 'POST',
-      body: JSON.stringify({
-        actor_role: params.actor_role,
-        actor_email: params.actor_email,
-      }),
+      body: JSON.stringify(
+        mockApiMode
+          ? { actor_role: params.actor_role, actor_email: params.actor_email }
+          : {}
+      ),
     }),
 
-  getConflicts: (role: UserRole, institutionId?: string) =>
-    requestWithRefresh<{
-      environment: string;
-      conflicts: ConflictCase[];
-    }>(
-      `/conflicts?role=${encodeURIComponent(role)}&institution_id=${encodeURIComponent(
-        institutionId || 'INST-KKR-101'
-      )}`
-    ),
+  getConflicts: async (role: UserRole, institutionId?: string) => {
+      if (mockApiMode) {
+        return requestWithRefresh<{
+          environment: string;
+          conflicts: ConflictCase[];
+        }>(`/conflicts?role=${encodeURIComponent(role)}&institution_id=${encodeURIComponent(
+          institutionId || 'INST-KKR-101'
+        )}`);
+      }
+      const result = await requestWithRefresh<{ environment: string; cases: BackendDuplicateCase[] }>(
+        '/students/duplicates'
+      );
+      return { environment: result.environment, conflicts: result.cases.map(mapBackendDuplicate) };
+    },
 
-  resolveConflict: (params: {
+  resolveConflict: async (params: {
     caseId: string;
     resolution_action: string;
     resolution_notes: string;
     actor_role: UserRole;
     actor_email: string;
-  }) =>
-    requestWithRefresh<{
-      conflict: ConflictCase;
-      audit_event: AuditEvent;
-    }>(`/conflicts/${encodeURIComponent(params.caseId)}/resolve`, {
+  }) => {
+    if (mockApiMode) {
+      return requestWithRefresh<{
+        conflict: ConflictCase;
+        audit_event: AuditEvent;
+      }>(`/conflicts/${encodeURIComponent(params.caseId)}/resolve`, {
+        method: 'POST',
+        body: JSON.stringify(params),
+      });
+    }
+    const outcomeByAction: Record<string, string> = {
+      CONFIRM_DUPLICATE: 'CONFIRMED_DUPLICATE',
+      NOT_A_DUPLICATE: 'DISTINCT_STUDENTS',
+      REQUEST_INFO: 'INSUFFICIENT_EVIDENCE',
+      CONFIRMED_DUPLICATE: 'CONFIRMED_DUPLICATE',
+      DISTINCT_STUDENTS: 'DISTINCT_STUDENTS',
+      INSUFFICIENT_EVIDENCE: 'INSUFFICIENT_EVIDENCE',
+      ESCALATED: 'ESCALATED',
+    };
+    const updated = await requestWithRefresh<BackendDuplicateCase>(
+      `/students/duplicates/${encodeURIComponent(params.caseId)}/decisions`, {
       method: 'POST',
-      body: JSON.stringify(params),
-    }),
+      body: JSON.stringify({ outcome: outcomeByAction[params.resolution_action] }),
+    });
+    return { conflict: mapBackendDuplicate(updated), audit_event: null };
+  },
+
+  scanDuplicates: () =>
+    requestWithRefresh<{
+      environment: string;
+      candidates_examined: number;
+      cases_created: number;
+      cases_rescanned: number;
+    }>('/students/duplicates/scan', { method: 'POST' }),
 
   getAttestations: (role: UserRole, institutionId?: string) =>
     requestWithRefresh<{

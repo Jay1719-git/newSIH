@@ -23,11 +23,11 @@ import { VALIDATION_RULES_CATALOG } from '../../lib/weaveEngine';
  * 1. /app/audit — Chronological Audit Timeline (Section 14)
  */
 export const AuditTimelinePage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, apiMode } = useAuth();
   const [actionFilter, setActionFilter] = useState<string>('ALL');
   const [dateFilter, setDateFilter] = useState<string>('');
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: weaveQueryKeys.auditEvents(user.role, user.institution_id),
     queryFn: () => weaveApiClient.getAuditEvents(user.role, user.institution_id),
   });
@@ -35,6 +35,14 @@ export const AuditTimelinePage: React.FC = () => {
   if (isLoading) {
     return (
       <div role="status" className="bg-white border border-[#DEDDD5] rounded-md p-6 animate-pulse h-64" />
+    );
+  }
+
+  if (isError && apiMode === 'live') {
+    return (
+      <div role="status" className="bg-white border border-[#DEDDD5] rounded-md p-6 text-xs text-[#686B65]">
+        Audit event listing is not implemented by the FastAPI backend yet. The in-memory Express timeline is not shown in live mode.
+      </div>
     );
   }
 
@@ -586,12 +594,13 @@ export const AssistantPage: React.FC = () => {
  * 3. /app/settings — Profile, API Mode & Attestation Management Page
  */
 export const SettingsPage: React.FC = () => {
-  const { user, apiMode, setApiMode } = useAuth();
+  const { user, apiMode } = useAuth();
   const queryClient = useQueryClient();
 
   const attQuery = useQuery({
     queryKey: weaveQueryKeys.attestations(user.role, user.institution_id),
     queryFn: () => weaveApiClient.getAttestations(user.role, user.institution_id),
+    enabled: apiMode === 'mock',
   });
 
   const stuQuery = useQuery({
@@ -665,33 +674,22 @@ export const SettingsPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="pt-2 flex items-center gap-3 text-xs">
-          <span className="font-medium text-[#20241F]">Banner Mode Simulation:</span>
-          <button
-            type="button"
-            onClick={() => setApiMode('live')}
-            className={`px-3 py-1.5 rounded-sm border ${
-              apiMode === 'live'
-                ? 'bg-[#244C3A] text-white border-[#244C3A]'
-                : 'bg-[#F7F6F2] text-[#20241F] border-[#DEDDD5]'
-            }`}
-          >
-            Synthetic Backend (/api/v1)
-          </button>
-          <button
-            type="button"
-            onClick={() => setApiMode('mock')}
-            className={`px-3 py-1.5 rounded-sm border ${
-              apiMode === 'mock'
-                ? 'bg-[#244C3A] text-white border-[#244C3A]'
-                : 'bg-[#F7F6F2] text-[#20241F] border-[#DEDDD5]'
-            }`}
-          >
-            Mock Mode Banner (VITE_API_MODE=mock)
-          </button>
-        </div>
+        <p className="pt-2 text-xs text-[#686B65]">
+          {apiMode === 'live'
+            ? 'Live API mode is configured with VITE_API_MODE=live and a FastAPI proxy target.'
+            : 'Mock API mode uses in-memory Express fixtures. Set VITE_API_MODE=live to route requests to FastAPI.'}
+        </p>
       </div>
 
+      {apiMode === 'live' ? (
+        <div className="bg-white border border-[#DEDDD5] rounded-md p-6 space-y-2">
+          <h2 className="font-display text-base font-semibold text-[#20241F]">Attestation registry unavailable</h2>
+          <p className="text-xs text-[#686B65]">
+            The FastAPI backend has no attestation registry or public QR verification route. Its purpose-scoped verification credential API is separate; this demo attestation screen is not presented as live functionality.
+          </p>
+        </div>
+      ) : (
+      <>
       {/* Consent-Gated Ed25519 Attestation Issuance & Registry */}
       <div className="bg-white border border-[#DEDDD5] rounded-md p-6 space-y-5">
         <div>
@@ -817,6 +815,8 @@ export const SettingsPage: React.FC = () => {
           ))}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 };

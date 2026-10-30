@@ -11,8 +11,10 @@ import {
 } from 'lucide-react';
 import { WeaveLogo } from '../../components/ui/WeaveLogo';
 import { weaveApiClient, weaveQueryKeys, ApiClientError } from '../../lib/api-client';
+import { useAuth } from '../../lib/auth';
 
 export const VerifyPage: React.FC = () => {
+  const { apiMode } = useAuth();
   const { token = 'att-2026-901' } = useParams<{ token: string }>();
   const navigate = useNavigate();
   const [tokenInput, setTokenInput] = useState(token);
@@ -21,6 +23,7 @@ export const VerifyPage: React.FC = () => {
     queryKey: weaveQueryKeys.verifyToken(token),
     queryFn: () => weaveApiClient.verifyTokenPublic(token),
     retry: false,
+    enabled: apiMode === 'mock',
   });
 
   const handleTokenSubmit = (e: React.FormEvent) => {
@@ -32,6 +35,20 @@ export const VerifyPage: React.FC = () => {
   };
 
   const opaqueVerifyUrl = `https://weave.synth.edu/verify/${encodeURIComponent(token)}`;
+
+  if (apiMode === 'live') {
+    return (
+      <main className="min-h-screen bg-[#F7F6F2] text-[#20241F] p-8">
+        <div role="status" className="max-w-2xl mx-auto bg-white border border-[#DEDDD5] rounded-md p-6 space-y-3">
+          <h1 className="font-display text-xl font-semibold">Public verification unavailable</h1>
+          <p className="text-sm text-[#686B65]">
+            The current FastAPI contract does not provide a public QR or attestation verification route. This request was not checked against an official service.
+          </p>
+          <Link to="/" className="text-sm text-[#244C3A] underline">Return to WEAVE</Link>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F7F6F2] text-[#20241F]">

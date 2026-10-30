@@ -1,0 +1,1 @@
+"""WEAVE FastAPI application."""

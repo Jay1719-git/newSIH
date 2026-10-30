@@ -1,6 +1,6 @@
 import express from 'express';
 import path from 'path';
-import { createServer as createViteServer } from 'vite';
+import { createServer as createViteServer, loadEnv } from 'vite';
 import { GoogleGenAI, type GenerateContentResponse } from '@google/genai';
 import {
   VALIDATION_RULES_CATALOG,
@@ -74,6 +74,62 @@ function appendAuditEvent(params: {
 
 async function startServer() {
   const app = express();
+  const viteEnv = loadEnv(process.env.NODE_ENV || 'development', process.cwd(), ['VITE_', 'WEAVE_']);
+
+  // Optional same-origin proxy to the FastAPI backend. Keep it before the demo
+  // routes so live mode can never fall through to in-memory fixture responses.
+  const fastApiUrl = process.env.WEAVE_FASTAPI_URL || viteEnv.WEAVE_FASTAPI_URL;
+  const liveMode = (process.env.VITE_API_MODE || viteEnv.VITE_API_MODE) === 'live';
+  app.use('/api/v1', async (req, res, next) => {
+    if (!liveMode) return next();
+    if (!fastApiUrl) {
+      res.status(503).json(
+        createApiError(
+          'BACKEND_NOT_CONFIGURED',
+          'Live mode requires WEAVE_FASTAPI_URL. Demo API responses are disabled.',
+          `req_${Date.now().toString(36)}`
+        )
+      );
+      return;
+    }
+
+    try {
+      const target = new URL(req.originalUrl, fastApiUrl);
+      const bodyChunks: Buffer[] = [];
+      for await (const chunk of req) bodyChunks.push(Buffer.from(chunk));
+      const body = Buffer.concat(bodyChunks);
+      const headers = new Headers();
+      for (const name of ['accept', 'authorization', 'content-type', 'cookie', 'x-request-id']) {
+        const value = req.headers[name];
+        if (typeof value === 'string') headers.set(name, value);
+      }
+
+      const upstream = await fetch(target, {
+        method: req.method,
+        headers,
+        body: ['GET', 'HEAD'].includes(req.method) || body.length === 0 ? undefined : body,
+        redirect: 'manual',
+      });
+      res.status(upstream.status);
+      upstream.headers.forEach((value, name) => {
+        if (!['connection', 'content-encoding', 'content-length', 'transfer-encoding'].includes(name)) {
+          res.setHeader(name, value);
+        }
+      });
+      const cookies = upstream.headers.getSetCookie();
+      if (cookies.length) res.setHeader('set-cookie', cookies);
+      res.send(Buffer.from(await upstream.arrayBuffer()));
+    } catch {
+      res.status(502).json(
+        createApiError(
+          'BACKEND_UNAVAILABLE',
+          'The FastAPI backend could not complete this request.',
+          `req_${Date.now().toString(36)}`
+        )
+      );
+    }
+  });
+
   app.use(express.json({ limit: '2mb' }));
 
   // Health Check

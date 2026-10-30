@@ -13,12 +13,13 @@ const loginSchema = z.object({
   email: z.string().email('Enter a valid synthetic institutional or regulatory email address.'),
   password: z
     .string()
-    .min(6, 'Password must be at least 6 characters in development demo mode.'),
+    .min(12, 'Password must be at least 12 characters.'),
 });
 
 type LoginFormValues = z.infer<typeof loginSchema>;
 
 export const LoginPage: React.FC = () => {
+  const liveBackend = import.meta.env.VITE_API_MODE === 'live';
   const navigate = useNavigate();
   const { loginWithAccount } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
@@ -32,8 +33,8 @@ export const LoginPage: React.FC = () => {
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      email: SYNTHETIC_DEMO_ACCOUNTS[0].email,
-      password: 'synth-demo-session',
+      email: liveBackend ? '' : SYNTHETIC_DEMO_ACCOUNTS[0].email,
+      password: liveBackend ? '' : 'synth-demo-session',
     },
   });
 
@@ -66,8 +67,9 @@ export const LoginPage: React.FC = () => {
           <div className="flex items-center gap-2 font-medium">
             <ShieldAlert className="w-3.5 h-3.5 text-[#8E6218] shrink-0" />
             <span>
-              SYNTHETIC DEMO AUTHENTICATION — Development-only session simulation using fixture
-              accounts. Not production security.
+              {liveBackend
+                ? 'SYNTHETIC BACKEND ACCOUNT — Authenticated by the local FastAPI service; not a production identity provider.'
+                : 'SYNTHETIC DEMO AUTHENTICATION — Development-only session simulation using fixture accounts. Not production security.'}
             </span>
           </div>
           <Link to="/" className="underline hover:text-[#244C3A] font-mono">
@@ -128,7 +130,7 @@ export const LoginPage: React.FC = () => {
                 htmlFor="login-password"
                 className="block text-xs font-medium text-[#20241F] mb-1.5"
               >
-                Session Passphrase (Synthetic Demo)
+                {liveBackend ? 'Account Password' : 'Session Passphrase (Synthetic Demo)'}
               </label>
               <div className="relative">
                 <input
@@ -170,6 +172,16 @@ export const LoginPage: React.FC = () => {
 
         {/* Right: Synthetic Role Fixture Selector */}
         <div className="lg:col-span-6 space-y-4">
+          {liveBackend ? (
+            <div className="p-5 bg-white border border-[#DEDDD5] rounded-md space-y-2">
+              <h2 className="font-display text-lg font-semibold text-[#20241F]">Local API accounts</h2>
+              <p className="text-xs text-[#686B65]">
+                Enter credentials provisioned in PostgreSQL with the backend administration CLI.
+                Demo persona buttons are hidden because they do not authenticate against FastAPI.
+              </p>
+            </div>
+          ) : (
+          <>
           <div>
             <div className="text-xs font-mono uppercase tracking-widest text-[#686B65]">
               Synthetic Fixture Accounts (packages/fixtures)
@@ -202,6 +214,8 @@ export const LoginPage: React.FC = () => {
               </button>
             ))}
           </div>
+          </>
+          )}
         </div>
       </main>
     </div>

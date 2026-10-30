@@ -22,7 +22,7 @@ import { weaveApiClient, weaveQueryKeys } from '../../lib/api-client';
 import { isInstitutionScopedRole } from '../../lib/weaveEngine';
 
 export const DashboardPage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, apiMode } = useAuth();
   const instScoped = isInstitutionScopedRole(user.role);
 
   const instQuery = useQuery({
@@ -428,6 +428,14 @@ export const DashboardPage: React.FC = () => {
                 <p className="text-[#20241F]">{ev.summary}</p>
               </div>
             ))}
+            {apiMode === 'live' && audQuery.isError && (
+              <p className="p-4 text-xs text-[#686B65]">
+                Audit listing is not implemented in the FastAPI backend. No demo timeline is substituted.
+              </p>
+            )}
+            {!audQuery.isError && auditEvents.length === 0 && (
+              <p className="p-4 text-xs text-[#686B65]">No audit events are available.</p>
+            )}
           </div>
         </section>
       </div>

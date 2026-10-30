@@ -34,40 +34,234 @@ paths:
     get:
       summary: Current institution and regulator overview
       operationId: getInstitutionsOverview
+      security:
+        - BearerAuth: []
       responses:
         '200':
           description: Institutions and program intake slices
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
   /students/batches/upload:
     post:
       summary: Upload and deterministically validate a synthetic CSV batch
       operationId: uploadStudentBatch
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadBatchRequest'
       responses:
         '201':
           description: Batch ingested and validated
-        '400':
-          description: Validation error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: '#/components/schemas/UploadBatchResponse'
+        '200':
+          description: An identical prior upload was returned without creating another batch or audit event.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadBatchResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /students/batches/{batch_id}:
+    get:
+      summary: Read an institution-scoped import batch and its row outcomes
+      operationId: getStudentBatch
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: batch_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Batch status, counts, masked records, and deterministic findings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchDetailResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /students/batches/{batch_id}/error-report:
+    get:
+      summary: Download a formula-safe CSV of non-passing row findings
+      operationId: downloadStudentBatchErrorReport
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: batch_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: CSV report containing masked APAAR values and row findings.
+          content:
+            text/csv:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
   /students/validation-results:
     get:
       summary: List student records with masked APAAR and deterministic rule outcomes
       operationId: getValidationResults
+      security:
+        - BearerAuth: []
       responses:
         '200':
           description: Masked student records and rule outcomes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationResultsResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+  /students/duplicates/scan:
+    post:
+      summary: Scan authorized records for deterministic duplicate candidates
+      operationId: scanStudentDuplicates
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Scan counts; candidates remain review leads.
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+  /students/duplicates:
+    get:
+      summary: List masked duplicate review cases within the caller's authorized scope
+      operationId: listDuplicateCases
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Masked candidates, reasons, status, and decision history.
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+  /students/duplicates/{case_id}/decisions:
+    post:
+      summary: Record a human review outcome for a duplicate candidate
+      operationId: decideDuplicateCase
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: case_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DuplicateDecisionRequest'
+      responses:
+        '200':
+          description: Updated case and appended review outcome.
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /students/batches/{batch_id}/commit:
+    post:
+      summary: Atomically commit eligible rows after rechecking approved intake
+      operationId: commitStudentBatch
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: batch_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitBatchRequest'
+      responses:
+        '200':
+          description: "newly_committed is zero on repeated commit."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommitBatchResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          $ref: '#/components/responses/CapacityConflictError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
   /conflicts:
     get:
       summary: List cross-institution and duplicate APAAR conflict cases
       operationId: getConflicts
+      security:
+        - BearerAuth: []
       responses:
         '200':
           description: Conflict review queue
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
   /conflicts/{case_id}/resolve:
     post:
       summary: Resolve a conflict case with human rationale and audit event
       operationId: resolveConflict
+      security:
+        - BearerAuth: []
       parameters:
         - name: case_id
           in: path
@@ -77,23 +271,41 @@ paths:
       responses:
         '200':
           description: Conflict case resolved
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
   /attestations:
     get:
       summary: List platform-issued Ed25519 enrolment attestations
       operationId: getAttestations
+      security:
+        - BearerAuth: []
       responses:
         '200':
           description: Attestation list
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
     post:
       summary: Issue a consent-verified Ed25519 student enrolment attestation
       operationId: issueAttestation
+      security:
+        - BearerAuth: []
       responses:
         '201':
           description: Attestation signed and issued
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
   /attestations/{id}/revoke:
     post:
       summary: Revoke an active attestation and append tamper-evident audit entry
       operationId: revokeAttestation
+      security:
+        - BearerAuth: []
       parameters:
         - name: id
           in: path
@@ -103,22 +315,609 @@ paths:
       responses:
         '200':
           description: Attestation revoked
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
   /attestations/verify:
     post:
       summary: Verify an attestation ID or QR JSON payload against Ed25519 signature, expiry, and revocation
       operationId: verifyAttestation
+      security:
+        - BearerAuth: []
       responses:
         '200':
           description: Deterministic verification result
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
   /audit-events:
     get:
       summary: List tamper-evident SHA-256 hash-chained audit events
       operationId: getAuditEvents
+      security:
+        - BearerAuth: []
       responses:
         '200':
           description: Audit trail and chain verification status
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+  /auth/login:
+    post:
+      summary: Exchange synthetic demo credentials for a short-lived access token
+      description: Demo authentication only; user roles and scopes are loaded from the server-side database.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Access token issued; refresh token is set in an HttpOnly cookie.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: SameSite=Strict HttpOnly refresh cookie.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequestsError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /auth/refresh:
+    post:
+      summary: Rotate the refresh cookie and issue a new access token
+      operationId: refreshAccessToken
+      parameters:
+        - name: weave_refresh
+          in: cookie
+          required: true
+          schema:
+            type: string
+          description: HttpOnly refresh cookie set by login.
+      responses:
+        '200':
+          description: New access token issued and refresh cookie rotated.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: Rotated SameSite=Strict HttpOnly refresh cookie.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /auth/logout:
+    post:
+      summary: Revoke the current authenticated session
+      operationId: logout
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Session revoked and refresh cookie cleared.
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /auth/me:
+    get:
+      summary: Return the current server-authorized account
+      operationId: getCurrentUser
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Authenticated account and server-resolved scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticatedUser'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /consents:
+    post:
+      operationId: grantVerificationConsent
+      summary: Student grants purpose and claim scoped verification consent
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enrolment_id, verifier_user_id, purpose, permitted_claims]
+              properties:
+                enrolment_id: {type: string, format: uuid}
+                verifier_user_id: {type: string, format: uuid}
+                purpose: {type: string, pattern: '^[A-Z][A-Z0-9_]{1,119}$'}
+                permitted_claims:
+                  type: array
+                  uniqueItems: true
+                  items: {type: string, enum: [enrolment_status, program_code, academic_year, award_status]}
+      responses:
+        '201': {description: Consent grant recorded}
+        '403': {$ref: '#/components/responses/ForbiddenError'}
+  /consents/{consent_id}/revoke:
+    post:
+      operationId: revokeVerificationConsent
+      summary: Withdraw consent and revoke outstanding credentials
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: consent_id
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200': {description: Consent withdrawn}
+        '404': {$ref: '#/components/responses/NotFoundError'}
+  /verification/credentials:
+    post:
+      operationId: createVerificationCredential
+      summary: Create a short lived audience bound WEAVE record check
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enrolment_id, purpose, claims, audience]
+              properties:
+                enrolment_id: {type: string, format: uuid}
+                purpose: {type: string}
+                claims:
+                  type: array
+                  minItems: 1
+                  uniqueItems: true
+                  items: {type: string, enum: [enrolment_status, program_code, academic_year, award_status]}
+                audience: {type: string, minLength: 1, maxLength: 200}
+      responses:
+        '200': {description: Minimized signed claims with explicit WEAVE-only source label}
+        '403': {$ref: '#/components/responses/ForbiddenError'}
+  /verification/credentials/verify:
+    post:
+      operationId: verifyCredential
+      summary: Verify signature, issuer, audience, expiry and current revocation state
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [credential, audience]
+              properties:
+                credential: {type: string, maxLength: 10000}
+                audience: {type: string, minLength: 1, maxLength: 200}
+      responses:
+        '200': {description: Verified minimized claims}
+        '400': {description: Invalid signature or encoding}
+        '403': {description: Issuer or audience mismatch}
+        '410': {description: Expired or revoked credential}
+  /verification/grants:
+    post:
+      operationId: createVerifierGrant
+      summary: Regulator administrator grants a verifier purpose and claim permissions
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [verifier_user_id, purpose, permitted_claims, expires_at]
+              properties:
+                verifier_user_id: {type: string, format: uuid}
+                purpose: {type: string}
+                permitted_claims:
+                  type: array
+                  uniqueItems: true
+                  items: {type: string, enum: [enrolment_status, program_code, academic_year, award_status]}
+                expires_at: {type: string, format: date-time}
+      responses:
+        '201': {description: Permission grant recorded and audited}
+        '403': {$ref: '#/components/responses/ForbiddenError'}
+  /verification/grants/{grant_id}/revoke:
+    post:
+      operationId: revokeVerifierGrant
+      summary: Regulator administrator revokes a verifier permission grant
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: grant_id
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200': {description: Permission revoked and audited}
+        '403': {$ref: '#/components/responses/ForbiddenError'}
 components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: 15-minute opaque access token; refresh token is held in an HttpOnly cookie.
+  responses:
+    BadRequestError:
+      description: The CSV has a file-level format, size, or row-count error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    UnauthorizedError:
+      description: Authentication is required, invalid, or expired.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    ForbiddenError:
+      description: Authenticated account lacks permission for this operation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    NotFoundError:
+      description: Batch does not exist in the authenticated institution scope.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    CapacityConflictError:
+      description: Intake changed before commit; the transaction commits no enrolments.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    ValidationError:
+      description: Request body or parameters failed validation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    TooManyRequestsError:
+      description: Login throttling limit reached.
+      headers:
+        Retry-After:
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    InternalServerError:
+      description: An unexpected internal failure occurred.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
   schemas:
+    DuplicateDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [outcome]
+      properties:
+        outcome:
+          type: string
+          enum: [CONFIRMED_DUPLICATE, DISTINCT_STUDENTS, INSUFFICIENT_EVIDENCE, ESCALATED]
+    UploadBatchRequest:
+      type: object
+      required: [filename, csv_content]
+      properties:
+        filename:
+          type: string
+          minLength: 1
+          maxLength: 255
+        csv_content:
+          type: string
+          minLength: 1
+          maxLength: 5242880
+          description: Synthetic CSV text; raw APAAR values are processed in memory and never persisted or logged.
+        institution_id:
+          type: [string, 'null']
+          description: Legacy UI metadata only; authorization always uses authenticated membership.
+        actor_role:
+          type: [string, 'null']
+          description: Legacy demo metadata only; not an authenticated identity or authority.
+        actor_email:
+          type: [string, 'null']
+          format: email
+          description: Legacy demo metadata only; ignored for authorization and audit attribution.
+    StudentCsvColumns:
+      type: object
+      description: |-
+        Header names are case-insensitive. Required legacy columns remain unchanged. Optional admission fields
+        are additive. `enrollment_year` matches an AcademicYear code or its start year. Institution scope comes
+        only from the bearer account. Unknown columns, including Aadhaar, are rejected.
+      required: [student_ref, apaar_id, full_name, dob, program_code, enrollment_year, consent_granted]
+      properties:
+        student_ref: {type: string}
+        apaar_id:
+          type: string
+          description: Synthetic APAAR reference; blank yields a provisional-identifier warning.
+        full_name: {type: string}
+        dob: {type: string, format: date}
+        program_code: {type: string}
+        enrollment_year: {type: string}
+        consent_granted:
+          type: string
+          enum: ['true', 'false', '1', '0', 'yes', 'no']
+        admission_date: {type: string, format: date}
+        seat_category_code:
+          type: string
+          description: Must name an existing configured seat category; no pool is inferred.
+        supernumerary_seat:
+          type: string
+          enum: ['true', 'false', '1', '0', 'yes', 'no']
+        nri_status:
+          type: string
+          enum: ['true', 'false', '1', '0', 'yes', 'no']
+        oci_status:
+          type: string
+          enum: ['true', 'false', '1', '0', 'yes', 'no']
+        foreign_national_status:
+          type: string
+          enum: ['true', 'false', '1', '0', 'yes', 'no']
+        admission_status:
+          type: string
+          enum: [ADMITTED, WITHDRAWN, PENDING_REVIEW]
+      x-csv-format: true
+    UploadBatchResponse:
+      type: object
+      required: [environment, ruleset_version, batch, records, conflicts_created, review_cases_created, audit_event, idempotent_replay]
+      properties:
+        environment: {type: string, example: SYNTHETIC}
+        ruleset_version: {type: string}
+        batch: {$ref: '#/components/schemas/StudentBatch'}
+        records:
+          type: array
+          items: {$ref: '#/components/schemas/StudentRecord'}
+        conflicts_created:
+          type: array
+          description: Existing-client compatibility field; review cases are identified separately.
+          items: {$ref: '#/components/schemas/ConflictCase'}
+        review_cases_created:
+          type: array
+          items: {type: string, format: uuid}
+        audit_event:
+          anyOf:
+            - {$ref: '#/components/schemas/AuditEvent'}
+            - {type: 'null'}
+        idempotent_replay: {type: boolean}
+    BatchDetailResponse:
+      type: object
+      required: [environment, ruleset_version, batch, records]
+      properties:
+        environment: {type: string}
+        ruleset_version: {type: string}
+        batch: {$ref: '#/components/schemas/StudentBatch'}
+        records:
+          type: array
+          items: {$ref: '#/components/schemas/StudentRecord'}
+    ValidationResultsResponse:
+      type: object
+      required: [environment, ruleset_version, batches, students]
+      properties:
+        environment: {type: string}
+        ruleset_version: {type: string}
+        batches:
+          type: array
+          items: {$ref: '#/components/schemas/StudentBatch'}
+        students:
+          type: array
+          items: {$ref: '#/components/schemas/StudentRecord'}
+    CommitBatchRequest:
+      type: object
+      description: Legacy actor metadata is ignored; the authenticated account is the only actor.
+      properties:
+        actor_role: {type: string}
+        actor_email: {type: string, format: email}
+    CommitBatchResponse:
+      type: object
+      required: [environment, batch, newly_committed, audit_event]
+      properties:
+        environment: {type: string}
+        batch: {$ref: '#/components/schemas/StudentBatch'}
+        newly_committed: {type: integer, minimum: 0}
+        audit_event:
+          anyOf:
+            - {$ref: '#/components/schemas/AuditEvent'}
+            - {type: 'null'}
+    StudentBatch:
+      type: object
+      required: [id, institution_id, institution_name, filename, uploaded_by, total_rows, passed_rows, flagged_rows, failed_rows, committed_rows, ruleset_version, commit_eligible, committed, status, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        institution_id: {type: string, format: uuid}
+        institution_name: {type: string}
+        filename: {type: string}
+        uploaded_by: {type: string}
+        total_rows: {type: integer}
+        passed_rows: {type: integer}
+        flagged_rows: {type: integer}
+        failed_rows: {type: integer}
+        committed_rows: {type: integer}
+        ruleset_version: {type: string}
+        commit_eligible: {type: boolean}
+        committed: {type: boolean}
+        status:
+          type: string
+          enum: [COMPLETED, COMPLETED_WITH_FLAGS, FAILED]
+        created_at: {type: string, format: date-time}
+    StudentRecord:
+      type: object
+      description: API DTO omits internal HMAC digests. Format checks do not verify official identity.
+      required: [id, institution_id, institution_name, student_ref, apaar_masked, apaar_status, full_name, dob, program_code, enrollment_year, consent_granted, status, committed, validation_results, batch_id, created_at, row_status, admission_date, admission_status, seat_category_code, supernumerary_seat, nri_status, oci_status, foreign_national_status]
+      properties:
+        id: {type: string, format: uuid}
+        institution_id: {type: string, format: uuid}
+        institution_name: {type: string}
+        student_ref: {type: string}
+        apaar_masked: {type: string}
+        apaar_status:
+          type: string
+          enum: [NOT_PROVIDED, FORMAT_VALID, FORMAT_INVALID]
+          description: Synthetic format state only; not an official APAAR identity check.
+        full_name: {type: string}
+        dob: {type: string}
+        program_code: {type: string}
+        enrollment_year: {type: integer}
+        consent_granted: {type: boolean}
+        status:
+          type: string
+          enum: [VERIFIED, FLAGGED_CONFLICT, VALIDATION_FAILED, PENDING_REVIEW]
+          description: Imported rows remain pending until commit; APAAR format is not official verification.
+        committed: {type: boolean}
+        validation_results:
+          type: array
+          items: {$ref: '#/components/schemas/ValidationFinding'}
+        batch_id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        row_status:
+          type: string
+          enum: [READY, WARNING, REVIEW_REQUIRED, REJECTED, COMMITTED]
+        admission_date: {type: [string, 'null'], format: date}
+        admission_status:
+          type: string
+          enum: [ADMITTED, WITHDRAWN, PENDING_REVIEW]
+        seat_category_code: {type: [string, 'null']}
+        supernumerary_seat: {type: boolean}
+        nri_status: {type: boolean}
+        oci_status: {type: boolean}
+        foreign_national_status: {type: boolean}
+    ValidationFinding:
+      type: object
+      required: [rule_code, stu_code, rule_name, outcome, reason, affected_field, actual_masked, remediation, ruleset_version]
+      properties:
+        rule_code: {type: string}
+        stu_code: {type: string}
+        rule_name: {type: string}
+        outcome:
+          type: string
+          enum: [PASS, WARN, REVIEW, FAIL]
+        reason: {type: string}
+        expected_value: {type: string}
+        affected_field: {type: [string, 'null']}
+        actual_masked: {type: [string, 'null']}
+        remediation: {type: [string, 'null']}
+        ruleset_version: {type: string}
+    AuditEvent:
+      type: object
+      required: [id, institution_id, actor_role, actor_user_id, action, entity_type, entity_id, outcome, summary, previous_hash, event_hash, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        institution_id: {type: string}
+        actor_role: {type: string}
+        actor_user_id: {type: string}
+        action: {type: string}
+        entity_type: {type: string}
+        entity_id: {type: string}
+        outcome: {type: string}
+        summary: {type: string}
+        previous_hash: {type: string}
+        event_hash: {type: string}
+        created_at: {type: string, format: date-time}
+    ConflictCase:
+      type: object
+      description: Legacy client field; ingestion returns review case identifiers separately.
+      additionalProperties: true
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 320
+        password:
+          type: string
+          minLength: 1
+          maxLength: 1024
+    LoginResponse:
+      type: object
+      required: [environment, access_token, token_type, expires_in, user]
+      properties:
+        environment:
+          type: string
+          example: SYNTHETIC
+        access_token:
+          type: string
+        token_type:
+          type: string
+          const: bearer
+        expires_in:
+          type: integer
+          const: 900
+        user:
+          $ref: '#/components/schemas/AuthenticatedUser'
+    RefreshResponse:
+      type: object
+      required: [environment, access_token, token_type, expires_in]
+      properties:
+        environment:
+          type: string
+          example: SYNTHETIC
+        access_token:
+          type: string
+        token_type:
+          type: string
+          const: bearer
+        expires_in:
+          type: integer
+          const: 900
+    AuthenticatedUser:
+      type: object
+      required: [id, email, name, role, roleLabel, institution_id, institution_name, scopeDescription]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        role:
+          type: string
+          enum: [regulator_admin, regulator_officer, institution_admin, institution_operator, auditor, student, external_verifier]
+        roleLabel:
+          type: string
+        institution_id:
+          type: [string, 'null']
+          format: uuid
+        institution_name:
+          type: [string, 'null']
+        scopeDescription:
+          type: string
     ApiError:
       type: object
       required:
@@ -141,3 +940,8 @@ components:
               type: array
               items:
                 type: object
+                properties:
+                  field:
+                    type: [string, 'null']
+                  reason:
+                    type: string

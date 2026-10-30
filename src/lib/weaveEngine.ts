@@ -3,7 +3,9 @@ export type UserRole =
   | 'regulator_officer'
   | 'institution_admin'
   | 'institution_operator'
-  | 'auditor';
+  | 'auditor'
+  | 'student'
+  | 'external_verifier';
 
 // Legacy alias preserved for unit tests and backward compatibility
 export type RolePersona =

@@ -1,0 +1,3 @@
+﻿student_ref,apaar_id,full_name,dob,program_code,enrollment_year,consent_granted,admission_date,seat_category_code,supernumerary_seat,nri_status,oci_status,foreign_national_status,admission_status
+SYNTH-001,648291038472,"Synthetic, Example Student",2006-04-22,DEMO-CSE,2026,true,2026-05-01,GEN,false,false,false,false,ADMITTED
+SYNTH-002,,Synthetic Provisional Student,2005-09-10,DEMO-CSE,2026,false,2026-05-03,GEN,false,false,false,false,ADMITTED
